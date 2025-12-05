@@ -177,6 +177,69 @@ class ClaudeSDKClient:
         async for data in self._query.receive_messages():
             yield parse_message(data)
 
+    async def resume_with_config(
+        self,
+        session_id: str,
+        override_options: ClaudeAgentOptions | None = None,
+        prompt: str | AsyncIterable[dict[str, Any]] | None = None,
+    ) -> None:
+        """
+        Resume a session with optional configuration override.
+
+        This method allows you to continue a previous conversation while changing
+        the agent's configuration (tools, MCP servers, system prompt, etc.).
+
+        Args:
+            session_id: The session ID to resume from
+            override_options: New configuration options to apply. If None, uses current options.
+            prompt: Optional initial prompt to send after resuming
+
+        Example:
+            ```python
+            # Create initial session with default tools
+            async with ClaudeSDKClient() as client:
+                await client.query("Help me understand this codebase")
+                # ... conversation happens ...
+                session_id = "abc123"  # Get from response
+
+            # Resume with different tools
+            new_options = ClaudeAgentOptions(
+                tools=["Read", "Grep"],  # Only allow read operations
+                mcp_servers={"new_server": {...}}  # Different MCP servers
+            )
+            async with ClaudeSDKClient() as client:
+                await client.resume_with_config(session_id, new_options)
+                await client.query("Continue our discussion")
+            ```
+        """
+        # Merge configurations if override_options is provided
+        if override_options:
+            # Create merged options: start with current, override with new, set resume
+            merged_options = replace(
+                self.options,
+                resume=session_id,
+                # Override with new options if provided
+                tools=override_options.tools if override_options.tools is not None else self.options.tools,
+                allowed_tools=override_options.allowed_tools if override_options.allowed_tools else self.options.allowed_tools,
+                disallowed_tools=override_options.disallowed_tools if override_options.disallowed_tools else self.options.disallowed_tools,
+                system_prompt=override_options.system_prompt if override_options.system_prompt is not None else self.options.system_prompt,
+                mcp_servers=override_options.mcp_servers if override_options.mcp_servers else self.options.mcp_servers,
+                model=override_options.model if override_options.model else self.options.model,
+                permission_mode=override_options.permission_mode if override_options.permission_mode else self.options.permission_mode,
+                max_turns=override_options.max_turns if override_options.max_turns else self.options.max_turns,
+                max_budget_usd=override_options.max_budget_usd if override_options.max_budget_usd is not None else self.options.max_budget_usd,
+                # Keep other fields from override_options if they differ
+                can_use_tool=override_options.can_use_tool if override_options.can_use_tool else self.options.can_use_tool,
+                hooks=override_options.hooks if override_options.hooks else self.options.hooks,
+            )
+            self.options = merged_options
+        else:
+            # Just set resume on current options
+            self.options = replace(self.options, resume=session_id)
+
+        # Connect with the merged/updated options
+        await self.connect(prompt=prompt)
+
     async def query(
         self, prompt: str | AsyncIterable[dict[str, Any]], session_id: str = "default"
     ) -> None:
